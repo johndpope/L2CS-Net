@@ -1,5 +1,5 @@
 import pathlib
-from typing import Union
+from typing import Union,Optional
 
 import cv2
 import numpy as np
@@ -10,19 +10,70 @@ from face_detection import RetinaFace
 
 from .utils import prep_input_numpy, getArch
 from .results import GazeResultContainer
+import gdown
+import os
+
+class L2CSConfig:
+    """Configuration for L2CS model paths and parameters"""
+    # Model URLs from L2CS-Net repository
+    MODEL_URLS = {
+        'gaze360': "https://drive.google.com/uc?id=1wGwP1QkVsmYJFKUFgOOA2YPAimHrezNz",  # L2CS-gaze360-_loader-180-4 model
+        'mpiigaze': "https://drive.google.com/uc?id=1E4Y1rkZL4y-rGPZ6Wp3HKQEn3Mwl5Z32"  # L2CS-MPIIGaze-_loader-90-4 model
+    }
+    
+    # Local paths where models will be stored
+    MODEL_PATHS = {
+        'gaze360': "models/L2CSNet_gaze360.pkl",
+        'mpiigaze': "models/L2CSNet_mpiigaze.pkl"
+    }
+    
+    @classmethod
+    def initialize(cls, model_type: str = 'gaze360'):
+        """
+        Initialize model directories and download if needed
+        
+        Args:
+            model_type: Either 'gaze360' or 'mpiigaze'
+        """
+        # Create models directory
+        os.makedirs("models", exist_ok=True)
+        
+        # Check if model exists
+        model_path = cls.MODEL_PATHS.get(model_type)
+        if model_path and not os.path.exists(model_path):
+            print(f"Downloading L2CS {model_type} model to {model_path}...")
+            
+            # Get corresponding URL
+            model_url = cls.MODEL_URLS.get(model_type)
+            if not model_url:
+                raise ValueError(f"Unknown model type: {model_type}")
+                
+            # Download using gdown for Google Drive links
+            gdown.download(model_url, model_path, quiet=False)
+            
+        print("L2CS model initialization complete.")
+
 
 
 class Pipeline:
 
     def __init__(
         self, 
-        weights: pathlib.Path, 
-        arch: str,
-        device: str = 'cpu', 
-        include_detector:bool = True,
-        confidence_threshold:float = 0.5
+        weights: Optional[pathlib.Path] = None,
+        model_type: str = 'gaze360',
+        arch: str = 'ResNet50',
+        device: str = 'cpu',
+        include_detector: bool = True,
+        confidence_threshold: float = 0.5
         ):
 
+        # Initialize model paths and download if needed
+        L2CSConfig.initialize(model_type)
+        
+        # Use provided weights path or default to downloaded model
+        if weights is None:
+            weights = pathlib.Path(L2CSConfig.MODEL_PATHS[model_type])
+            
         # Save input parameters
         self.weights = weights
         self.include_detector = include_detector
@@ -31,13 +82,18 @@ class Pipeline:
 
         # Create L2CS model
         self.model = getArch(arch, 90)
-        self.model.load_state_dict(torch.load(self.weights, map_location=device))
+        
+        # Load weights
+        try:
+            self.model.load_state_dict(torch.load(self.weights, map_location=device))
+        except Exception as e:
+            raise RuntimeError(f"Failed to load L2CS weights from {self.weights}: {str(e)}")
+            
         self.model.to(self.device)
         self.model.eval()
 
         # Create RetinaFace if requested
         if self.include_detector:
-
             if device.type == 'cpu':
                 self.detector = RetinaFace()
             else:
