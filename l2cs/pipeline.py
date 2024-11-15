@@ -1,4 +1,5 @@
 import pathlib
+from pathlib import Path
 from typing import Union,Optional
 
 import cv2
@@ -88,25 +89,50 @@ class Pipeline:
 
     def __init__(
         self, 
-        weights: Optional[pathlib.Path] = None,
+        weights: Optional[Path] = None,
         model_type: str = 'gaze360',
         arch: str = 'ResNet50',
         device: str = 'cpu',
         include_detector: bool = True,
         confidence_threshold: float = 0.5
         ):
-
-        # Initialize model paths and download if needed
+        
+        # Initialize model paths and check dependencies
         L2CSConfig.initialize(model_type)
         
         # Use provided weights path or default to downloaded model
         if weights is None:
-            weights = pathlib.Path(L2CSConfig.MODEL_PATHS[model_type])
-            
+            weights = Path(L2CSConfig.MODEL_PATHS[model_type])
+        
+        # Parse device string
+        self.device_str = device
+        if device == 'cpu':
+            self.device = torch.device('cpu')
+            self.gpu_id = None
+        else:
+            if ':' in device:
+                self.gpu_id = int(device.split(':')[1])
+            else:
+                self.gpu_id = 0
+            self.device = torch.device(f'cuda:{self.gpu_id}')
+
+        # Create RetinaFace if requested
+        if include_detector:
+            try:
+                from face_detection import RetinaFace
+                if self.device_str == 'cpu':
+                    self.detector = RetinaFace()
+                else:
+                    self.detector = RetinaFace(gpu_id=self.gpu_id)
+                self.detector_available = True
+            except ImportError:
+                logger.warning("face_detection package not available. Face detection disabled.")
+                self.detector_available = False
+                include_detector = False
+
         # Save input parameters
         self.weights = weights
         self.include_detector = include_detector
-        self.device = device
         self.confidence_threshold = confidence_threshold
 
         # Create L2CS model
@@ -114,23 +140,17 @@ class Pipeline:
         
         # Load weights
         try:
-            self.model.load_state_dict(torch.load(self.weights, map_location=device))
+            self.model.load_state_dict(torch.load(str(weights), map_location=self.device))
         except Exception as e:
-            raise RuntimeError(f"Failed to load L2CS weights from {self.weights}: {str(e)}")
+            raise RuntimeError(f"Failed to load L2CS weights from {weights}: {str(e)}")
             
         self.model.to(self.device)
         self.model.eval()
 
-        # Create RetinaFace if requested
+        # Initialize other components
         if self.include_detector:
-            if device.type == 'cpu':
-                self.detector = RetinaFace()
-            else:
-                self.detector = RetinaFace(gpu_id=device.index)
-
             self.softmax = nn.Softmax(dim=1)
-            self.idx_tensor = [idx for idx in range(90)]
-            self.idx_tensor = torch.FloatTensor(self.idx_tensor).to(self.device)
+            self.idx_tensor = torch.FloatTensor([idx for idx in range(90)]).to(self.device)
 
     def step(self, frame: np.ndarray):
         """Process a single frame"""
