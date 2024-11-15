@@ -13,12 +13,16 @@ from .results import GazeResultContainer
 import gdown
 import os
 
+
 class L2CSConfig:
     """Configuration for L2CS model paths and parameters"""
-    # Model URLs from L2CS-Net repository
-    MODEL_URLS = {
-        'gaze360': "https://drive.google.com/uc?id=1wGwP1QkVsmYJFKUFgOOA2YPAimHrezNz",  # L2CS-gaze360-_loader-180-4 model
-        'mpiigaze': "https://drive.google.com/uc?id=1E4Y1rkZL4y-rGPZ6Wp3HKQEn3Mwl5Z32"  # L2CS-MPIIGaze-_loader-90-4 model
+    # Model folder ID from L2CS-Net Google Drive
+    FOLDER_ID = "17p6ORr-JQJcw-eYtG2WGNiuS_qVKwdWd"
+    
+    # Model file names in the folder
+    MODEL_FILES = {
+        'gaze360': "L2CSNet_gaze360.pkl",  # Update with actual filename
+        'mpiigaze': "L2CSNet_mpiigaze.pkl"  # Update with actual filename
     }
     
     # Local paths where models will be stored
@@ -29,29 +33,39 @@ class L2CSConfig:
     
     @classmethod
     def initialize(cls, model_type: str = 'gaze360'):
-        """
-        Initialize model directories and download if needed
-        
-        Args:
-            model_type: Either 'gaze360' or 'mpiigaze'
-        """
-        # Create models directory
-        os.makedirs("models", exist_ok=True)
-        
-        # Check if model exists
-        model_path = cls.MODEL_PATHS.get(model_type)
-        if model_path and not os.path.exists(model_path):
-            print(f"Downloading L2CS {model_type} model to {model_path}...")
+        """Initialize model directories and download if needed"""
+        try:
+            # Create models directory
+            os.makedirs("models", exist_ok=True)
             
-            # Get corresponding URL
-            model_url = cls.MODEL_URLS.get(model_type)
-            if not model_url:
-                raise ValueError(f"Unknown model type: {model_type}")
+            # Check if model exists
+            model_path = cls.MODEL_PATHS.get(model_type)
+            model_file = cls.MODEL_FILES.get(model_type)
+            
+            if model_path and not os.path.exists(model_path):
+                print(f"Downloading L2CS {model_type} model to {model_path}...")
                 
-            # Download using gdown for Google Drive links
-            gdown.download(model_url, model_path, quiet=False)
+                try:
+                    # Download from Google Drive folder
+                    gdown.download_folder(
+                        id=cls.FOLDER_ID,
+                        output=str(pathlib.Path(model_path).parent),
+                        quiet=False,
+                        use_cookies=False
+                    )
+                    
+                    # Check if download was successful
+                    if not os.path.exists(model_path):
+                        raise RuntimeError(f"Model file {model_file} not found in downloaded folder")
+                        
+                except Exception as e:
+                    raise RuntimeError(f"Failed to download model: {str(e)}")
+                
+            print("L2CS model initialization complete.")
             
-        print("L2CS model initialization complete.")
+        except Exception as e:
+            print(f"Failed to initialize L2CS: {str(e)}")
+            raise
 
 
 
