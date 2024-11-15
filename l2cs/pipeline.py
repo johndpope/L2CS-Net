@@ -132,87 +132,87 @@ class Pipeline:
             self.idx_tensor = [idx for idx in range(90)]
             self.idx_tensor = torch.FloatTensor(self.idx_tensor).to(self.device)
 
-    def step(self, frame: np.ndarray) -> GazeResultContainer:
-
-        # Creating containers
-        face_imgs = []
-        bboxes = []
-        landmarks = []
-        scores = []
-
-        if self.include_detector:
-            faces = self.detector(frame)
-
-            if faces is not None: 
-                for box, landmark, score in faces:
-
-                    # Apply threshold
-                    if score < self.confidence_threshold:
-                        continue
-
-                    # Extract safe min and max of x,y
-                    x_min=int(box[0])
-                    if x_min < 0:
-                        x_min = 0
-                    y_min=int(box[1])
-                    if y_min < 0:
-                        y_min = 0
-                    x_max=int(box[2])
-                    y_max=int(box[3])
+    def step(self, frame: np.ndarray):
+        """Process a single frame"""
+        with torch.no_grad():
+            if self.include_detector and self.detector_available:
+                faces = self.detector(frame)
+                
+                if faces is not None:
+                    face_imgs = []
+                    bboxes = []
+                    landmarks = []
+                    scores = []
                     
-                    # Crop image
-                    img = frame[y_min:y_max, x_min:x_max]
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    img = cv2.resize(img, (224, 224))
-                    face_imgs.append(img)
-
-                    # Save data
-                    bboxes.append(box)
-                    landmarks.append(landmark)
-                    scores.append(score)
-
-                # Predict gaze
-                pitch, yaw = self.predict_gaze(np.stack(face_imgs))
-
+                    for box, landmark, score in faces:
+                        if score < self.confidence_threshold:
+                            continue
+                            
+                        # Extract face region
+                        x_min = max(int(box[0]), 0)
+                        y_min = max(int(box[1]), 0)
+                        x_max = int(box[2])
+                        y_max = int(box[3])
+                        
+                        img = frame[y_min:y_max, x_min:x_max]
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        img = cv2.resize(img, (224, 224))
+                        face_imgs.append(img)
+                        
+                        bboxes.append(box)
+                        landmarks.append(landmark)
+                        scores.append(score)
+                        
+                    if face_imgs:  # If faces were detected
+                        pitch, yaw = self.predict_gaze(np.stack(face_imgs))
+                    else:
+                        pitch = np.empty((0,1))
+                        yaw = np.empty((0,1))
+                        bboxes = np.array([])
+                        landmarks = np.array([])
+                        scores = np.array([])
+                else:
+                    pitch = np.empty((0,1))
+                    yaw = np.empty((0,1))
+                    bboxes = np.array([])
+                    landmarks = np.array([])
+                    scores = np.array([])
             else:
+                pitch, yaw = self.predict_gaze(frame)
+                bboxes = np.array([])
+                landmarks = np.array([])
+                scores = np.array([])
+                
+            return GazeResultContainer(
+                pitch=pitch,
+                yaw=yaw,
+                bboxes=np.array(bboxes) if len(bboxes) > 0 else np.empty((0,4)),
+                landmarks=np.array(landmarks) if len(landmarks) > 0 else np.empty((0,5,2)),
+                scores=np.array(scores) if len(scores) > 0 else np.empty(0)
+            )
 
-                pitch = np.empty((0,1))
-                yaw = np.empty((0,1))
-
-        else:
-            pitch, yaw = self.predict_gaze(frame)
-
-        # Save data
-        results = GazeResultContainer(
-            pitch=pitch,
-            yaw=yaw,
-            bboxes=np.stack(bboxes),
-            landmarks=np.stack(landmarks),
-            scores=np.stack(scores)
-        )
-
-        return results
-
-    def predict_gaze(self, frame: Union[np.ndarray, torch.Tensor]):
-        
+    def predict_gaze(self, frame: Union[np.ndarray, torch.Tensor]) -> Tuple[np.ndarray, np.ndarray]:
+        """Predict gaze angles from input frame(s)"""
         # Prepare input
         if isinstance(frame, np.ndarray):
             img = prep_input_numpy(frame, self.device)
         elif isinstance(frame, torch.Tensor):
-            img = frame
+            img = frame.to(self.device)
         else:
             raise RuntimeError("Invalid dtype for input")
-    
-        # Predict 
+
+        # Get predictions
         gaze_pitch, gaze_yaw = self.model(img)
+        
+        # Convert predictions
         pitch_predicted = self.softmax(gaze_pitch)
         yaw_predicted = self.softmax(gaze_yaw)
         
-        # Get continuous predictions in degrees.
-        pitch_predicted = torch.sum(pitch_predicted.data * self.idx_tensor, dim=1) * 4 - 180
-        yaw_predicted = torch.sum(yaw_predicted.data * self.idx_tensor, dim=1) * 4 - 180
+        # Get continuous predictions in degrees
+        pitch_predicted = torch.sum(pitch_predicted * self.idx_tensor, dim=1) * 4 - 180
+        yaw_predicted = torch.sum(yaw_predicted * self.idx_tensor, dim=1) * 4 - 180
         
-        pitch_predicted= pitch_predicted.cpu().detach().numpy()* np.pi/180.0
-        yaw_predicted= yaw_predicted.cpu().detach().numpy()* np.pi/180.0
-
+        pitch_predicted = pitch_predicted.cpu().detach().numpy() * np.pi/180.0
+        yaw_predicted = yaw_predicted.cpu().detach().numpy() * np.pi/180.0
+        
         return pitch_predicted, yaw_predicted
