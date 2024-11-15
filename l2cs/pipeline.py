@@ -12,17 +12,19 @@ from .utils import prep_input_numpy, getArch
 from .results import GazeResultContainer
 import gdown
 import os
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class L2CSConfig:
     """Configuration for L2CS model paths and parameters"""
-    # Model folder ID from L2CS-Net Google Drive
+    # Model folder ID for all models
     FOLDER_ID = "17p6ORr-JQJcw-eYtG2WGNiuS_qVKwdWd"
     
-    # Model file names in the folder
-    MODEL_FILES = {
-        'gaze360': "L2CSNet_gaze360.pkl",  # Update with actual filename
-        'mpiigaze': "L2CSNet_mpiigaze.pkl"  # Update with actual filename
+    # Direct file IDs for specific models
+    MODEL_FILE_IDS = {
+        'gaze360': "18S956r4jnHtSeT8z8t3z8AoJZjVnNqPJ"  # Direct link to gaze360 model
     }
     
     # Local paths where models will be stored
@@ -33,40 +35,53 @@ class L2CSConfig:
     
     @classmethod
     def initialize(cls, model_type: str = 'gaze360'):
-        """Initialize model directories and download if needed"""
+        """
+        Initialize model directories and download if needed.
+        For gaze360, downloads single file. For others, downloads from folder.
+        """
         try:
             # Create models directory
             os.makedirs("models", exist_ok=True)
             
             # Check if model exists
             model_path = cls.MODEL_PATHS.get(model_type)
-            model_file = cls.MODEL_FILES.get(model_type)
-            
-            if model_path and not os.path.exists(model_path):
-                print(f"Downloading L2CS {model_type} model to {model_path}...")
+            if not model_path:
+                raise ValueError(f"Unknown model type: {model_type}")
+                
+            if not os.path.exists(model_path):
+                logger.info(f"Downloading L2CS {model_type} model to {model_path}...")
                 
                 try:
-                    # Download from Google Drive folder
-                    gdown.download_folder(
-                        id=cls.FOLDER_ID,
-                        output=str(pathlib.Path(model_path).parent),
-                        quiet=False,
-                        use_cookies=False
-                    )
+                    # If it's gaze360, download single file
+                    if model_type == 'gaze360' and model_type in cls.MODEL_FILE_IDS:
+                        gdown.download(
+                            id=cls.MODEL_FILE_IDS[model_type],
+                            output=model_path,
+                            quiet=False,
+                            use_cookies=False
+                        )
+                    # Otherwise download from folder
+                    else:
+                        gdown.download_folder(
+                            id=cls.FOLDER_ID,
+                            output=str(Path(model_path).parent),
+                            quiet=False,
+                            use_cookies=False
+                        )
                     
                     # Check if download was successful
                     if not os.path.exists(model_path):
-                        raise RuntimeError(f"Model file {model_file} not found in downloaded folder")
+                        raise RuntimeError(f"Model file not found after download")
                         
                 except Exception as e:
                     raise RuntimeError(f"Failed to download model: {str(e)}")
                 
-            print("L2CS model initialization complete.")
+            logger.info("L2CS model initialization complete.")
             
         except Exception as e:
-            print(f"Failed to initialize L2CS: {str(e)}")
+            logger.error(f"Failed to initialize L2CS: {str(e)}")
             raise
-
+        
 
 
 class Pipeline:
