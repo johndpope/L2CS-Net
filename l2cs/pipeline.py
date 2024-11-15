@@ -13,7 +13,7 @@ from .results import GazeResultContainer
 import gdown
 import os
 import logging
-
+from typing import Dict, Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
 
