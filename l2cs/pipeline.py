@@ -147,10 +147,9 @@ class Pipeline:
         self.model.to(self.device)
         self.model.eval()
 
-        # Initialize other components
-        if self.include_detector:
-            self.softmax = nn.Softmax(dim=1)
-            self.idx_tensor = torch.FloatTensor([idx for idx in range(90)]).to(self.device)
+        # Initialize softmax and idx_tensor (needed for all cases)
+        self.softmax = nn.Softmax(dim=1)
+        self.idx_tensor = torch.FloatTensor([idx for idx in range(90)]).to(self.device)
 
     def step(self, frame: np.ndarray):
         """Process a single frame"""
